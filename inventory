@@ -1,0 +1,6 @@
+[gitlab_runner]
+host_gitlab_runner
+
+[deploy_target]
+host_deploy_target1
+host_deploy_target2

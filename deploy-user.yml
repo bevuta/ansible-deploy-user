@@ -1,0 +1,57 @@
+---
+- hosts: gitlab_runner
+  become: true
+  gather_facts: false
+  tags:
+    - provision
+  tasks:
+    - name: Install python-pip
+      apt: pkg=python-pip state=latest
+    - name: Install pexpect
+      pip: name=pexpect
+
+- hosts: gitlab_runner
+  vars:
+    runner_user: "gitlab-runner"
+    runner_user_home: "/home/{{ runner_user }}"
+  become: true
+  become_user: "{{ runner_user }}"
+  gather_facts: false
+  tasks:
+    - name: Create .ssh folder
+      file: path="{{ runner_user_home }}/.ssh" state=directory mode=0700
+    - name: create ssh key if it does not exist
+      expect:
+        command: ssh-keygen -t rsa
+        # only creates the key if the file does not exist
+        creates: "{{ runner_user_home }}/.ssh/id_rsa"
+        echo: yes
+        timeout: 5
+        responses:
+          "file": "{{ runner_user_home }}/.ssh/id_rsa" ## Enter file in which to save the key (/home/<remote_user>/.ssh/id_rsa)
+          "passphrase": "" ## Enter passphrase (empty for no passphrase)
+    - name: read public key
+      command: "cat {{ runner_user_home }}/.ssh/id_rsa.pub"
+      register: runner_pub_key
+
+- hosts: deploy_target
+  become: true
+  vars:
+    user: "deployer"
+    deploy_source_host: "gitlab-runner-host"
+  gather_facts: false
+  tasks:
+
+    - name: Ensure sudoers.d is enabled
+      lineinfile: dest=/etc/sudoers state=present backup=yes regexp='^#includedir /etc/sudoers.d' line='#includedir /etc/sudoers.d'
+
+    - name: Set up password-less sudo for user
+      copy: content="%{{ user }} ALL=(ALL) NOPASSWD:ALL" dest="/etc/sudoers.d/{{ user }}" owner=root group=root mode=0440
+
+    - name: Create user
+      user: name={{ user }} state=present group=deployers shell=/bin/bash
+    - name: add deploy key to authorized keys
+      authorized_key:
+        user: "{{ user }}"
+        key: "{{ hostvars[ deploy_source_host ].runner_pub_key.stdout}}"
+      
